@@ -1,74 +1,145 @@
-# Taş-Kağıt-Makas Görüntü Sınıflandırma (Rock Paper Scissors CNN)
+# Taş-Kağıt-Makas — Yapay Zekâ ile Canlı Oyun
 
-El hareketi fotoğraflarından **taş**, **kağıt** ve **makas** işaretlerini tanıyan bir derin öğrenme projesi.
-Proje, sıfırdan yazılan basit bir CNN'den başlayıp veri artırma ve MobileNetV2 tabanlı transfer learning ile
-**%99.4 doğrulama başarımına** ulaşan kademeli bir geliştirme sürecini belgeler.
+Web kameranıza el işareti yapın, yapay zekâ ne yaptığınızı anlasın ve kazananı söylesin.
+İki kişi aynı anda oynayabilir: ekrandaki iki kutuya ellerinizi tutmanız yeterli.
 
-## Sonuçlar
-
-| Aşama | Yaklaşım | Doğrulama Başarımı |
-|-------|----------|--------------------|
-| 1 | Sıfırdan CNN (3 evrişim bloğu) | %97.7 |
-| 2 | + EarlyStopping ile optimizasyon | %98.4 |
-| 3 | + Veri artırma (data augmentation) | %99.3 |
-| 4 | MobileNetV2 transfer learning + hibrit veri seti | **%99.4** |
-
-Aşama 4'teki model, iki kademeli eğitilir: önce yalnızca yeni sınıflandırıcı katmanları (`lr=1e-3`),
-ardından MobileNetV2'nin son 40 katmanı çok düşük öğrenme oranıyla (`lr=1e-5`) ince ayarlanır.
-
-**Depoyla birlikte gelen `models/rps_model.keras` dosyası, bu 4. aşama modelidir** (24 MB).
-Önceki aşamaların modelleri, `Flatten → Dense(512)` katmanı nedeniyle ~218 MB olduklarından
-depoya dahil edilmemiştir; `src/train.py --model cnn` ile yeniden üretilebilirler.
-
-## Model Mimarisi
-
-**Sıfırdan CNN:** `Conv2D(32) → MaxPool → Conv2D(64) → MaxPool → Conv2D(128) → MaxPool → Flatten → Dropout(0.5) → Dense(512) → Dense(3, softmax)`
-
-**Transfer learning:** `MobileNetV2 (ImageNet) → GlobalAveragePooling → Dropout(0.5) → Dense(128) → Dense(3, softmax)`
-
-Girdi boyutu 150×150×3, kayıp fonksiyonu `categorical_crossentropy`, optimizer `Adam`.
-Takip edilen metrikler: accuracy, precision, recall ve macro F1-score.
+Arkasında, el fotoğraflarından **taş / kağıt / makas** ayırt etmeyi öğrenen ve
+**%99.4 doğrulama başarımına** ulaşan bir derin öğrenme modeli çalışır.
+Model eğitilmiş olarak depoyla birlikte gelir — ayrıca indirmeniz veya eğitmeniz gerekmez.
 
 ---
 
-## Hızlı Başlangıç — Modeli Kullanma
+## Oynamak için 3 adım
 
-Model **zaten eğitilmiştir**; veri setini indirmenize veya yeniden eğitim yapmanıza gerek yoktur.
-Aşağıdaki üç adımla kendi bilgisayarınızda çalıştırabilirsiniz.
+### 1. Projeyi indirin
 
-### 1. Depoyu klonlayın
+Git kuruluysa:
 
 ```bash
 git clone https://github.com/AbdullahProgrammerX/Rock_paper_scissors_cnn.git
 cd Rock_paper_scissors_cnn
 ```
 
-### 2. Bağımlılıkları kurun
+Git yoksa: sayfanın üstündeki yeşil **Code → Download ZIP** düğmesiyle indirip klasöre çıkarın.
 
-**Windows (PowerShell):**
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+> **Windows'ta önemli:** Projeyi `C:\rps` gibi **kısa bir yola** çıkarın. İç içe klasörlerde
+> tutarsanız kurulum "uzun dosya yolu" hatası verebilir.
+
+### 2. Kurulumu çalıştırın
+
+Bu adım Python ortamını hazırlar ve gerekli her şeyi kurar. Birkaç dakika sürer (~600 MB indirir).
+
+| İşletim sistemi | Yapılacak |
+|-----------------|-----------|
+| **Windows** | `kur.bat` dosyasına **çift tıklayın** |
+| **Linux / macOS** | Terminalde `./kur.sh` |
+
+Öncesinde bilgisayarınızda **Python 3.10 – 3.12** kurulu olmalıdır
+([python.org/downloads](https://www.python.org/downloads/) — Windows'ta kurulum sırasında
+*"Add Python to PATH"* kutusunu işaretleyin). Python 3.13 henüz desteklenmiyor.
+
+### 3. Oynayın
+
+| İşletim sistemi | Yapılacak |
+|-----------------|-----------|
+| **Windows** | `oyna.bat` dosyasına **çift tıklayın** |
+| **Linux / macOS** | Terminalde `./oyna.sh` |
+
+Kamera açılır. **Oyuncu 1** soldaki yeşil kutuya, **Oyuncu 2** sağdaki kırmızı kutuya elini tutar;
+hamleler ve kazanan anında ekranda görünür. Çıkmak için `q` tuşuna basın.
+
+**İyi tanıma için ipuçları**
+
+- Elinizi kutunun içinde, kameraya yakın tutun ve kutuyu doldurun.
+- Ortam yeterince aydınlık olsun; arkadan gelen güçlü ışık tanımayı bozar.
+- Sade bir arka plan (düz duvar) en iyi sonucu verir.
+- Hamlenizi net yapın: taş = kapalı yumruk, kağıt = açık avuç, makas = iki parmak.
+
+---
+
+## Sorun giderme
+
+<details>
+<summary><b>Kamera açılmıyor / siyah ekran</b></summary>
+
+Birden fazla kameranız varsa indeksi değiştirin:
+
+```bash
+oyna.bat --camera 1      # Windows
+./oyna.sh --camera 1     # Linux / macOS
+```
+
+Kameranın Zoom, Teams gibi başka bir uygulama tarafından kullanılmadığından emin olun.
+Windows'ta *Ayarlar → Gizlilik ve güvenlik → Kamera* altında masaüstü uygulamalarının
+kamera erişimi açık olmalıdır.
+
+</details>
+
+<details>
+<summary><b>Kurulum "uzun dosya yolu" hatası veriyor (Windows)</b></summary>
+
+TensorFlow'un içindeki bazı dosya yolları 260 karakteri aşar. Hata şuna benzer:
+
+```
+ERROR: Could not install packages due to an OSError: [Errno 2] No such file or directory:
+'...\tensorflow\include\external\boringssl\...'
+HINT: This error might have occurred since this system does not have Windows Long Path support enabled.
+```
+
+İki çözümden biri:
+
+1. **Projeyi kısa bir yola taşıyın** — örneğin `C:\rps`. En kolay çözüm budur.
+2. **Uzun yol desteğini açın** — PowerShell'i *yönetici olarak* açıp şunu çalıştırın,
+   ardından bilgisayarı yeniden başlatın:
+
+   ```powershell
+   New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+   ```
+
+</details>
+
+<details>
+<summary><b>"module 'mediapipe' has no attribute 'solutions'" hatası</b></summary>
+
+Yanlış mediapipe sürümü kurulmuş demektir: MediaPipe 1.0 ile oyunun kullandığı `solutions`
+API'si kaldırıldı. `requirements.txt` doğru sürümleri sabitler, onunla kurun:
+
+```bash
 pip install -r requirements.txt
 ```
 
-**Linux / macOS:**
+Elle kuracaksanız: `pip install "mediapipe==0.10.21" "opencv-python==4.11.*"`
+
+</details>
+
+<details>
+<summary><b>"python bulunamadı" (Windows)</b></summary>
+
+Python kurulu değil ya da PATH'e eklenmemiş. [python.org/downloads](https://www.python.org/downloads/)
+adresinden 3.12 sürümünü kurun ve kurulum ekranındaki **"Add Python to PATH"** kutusunu işaretleyin.
+Kurulumdan sonra komut istemini kapatıp yeniden açın.
+
+</details>
+
+<details>
+<summary><b>Oyun yavaş çalışıyor</b></summary>
+
+Tahminler CPU üzerinde yapılır; bu normaldir ve oyun için yeterlidir. GPU gerekmez.
+Eski bir bilgisayarda takılma yaşarsanız arka plandaki diğer uygulamaları kapatmak yardımcı olur.
+
+</details>
+
+---
+
+## Projenin geri kalanı
+
+Oyun dışında, modeli kendi işinizde kullanmak veya yeniden eğitmek isterseniz.
+
+### Tek bir fotoğrafı sınıflandırma
+
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-> Python 3.10–3.12 gereklidir. GPU şart değildir; tahmin için CPU fazlasıyla yeterlidir.
-
-### 3. Modeli çalıştırın
-
-**Eğitilmiş model dosyası: `models/rps_model.keras`** — depoyla birlikte gelir, ayrıca indirmeniz gerekmez.
-
-Tek bir fotoğrafı sınıflandırmak için:
-
-```bash
-python src/predict.py foto.jpg
+.venv\Scripts\python src\predict.py foto.jpg      # Windows
+./.venv/bin/python src/predict.py foto.jpg        # Linux / macOS
 ```
 
 ```
@@ -79,18 +150,7 @@ Tahmin: Makas (scissors)  —  güven: %98.7
   Makas   98.70%
 ```
 
-Web kameranızla canlı denemek için:
-
-```bash
-python src/webcam.py
-```
-
-Elinizi ekrandaki yeşil karenin içine tutun; tahmin ve güven skoru canlı olarak gösterilir.
-Çıkmak için `q` tuşuna basın.
-
-### Kendi kodunuzda kullanma
-
-Model standart bir Keras modelidir; doğrudan yükleyip kullanabilirsiniz:
+### Modeli kendi kodunuzda kullanma
 
 ```python
 import numpy as np
@@ -101,34 +161,30 @@ CLASS_NAMES = ("paper", "rock", "scissors")   # Sıra önemlidir, modelin çık�
 model = keras.models.load_model("models/rps_model.keras")
 
 img = keras.utils.load_img("foto.jpg", target_size=(150, 150))
-array = keras.utils.img_to_array(img) / 255.0                   # 0-1 aralığına ölçekle
-batch = np.expand_dims(array, axis=0)                          # (1, 150, 150, 3)
+array = keras.utils.img_to_array(img) / 255.0   # 0-1 aralığına ölçekle
+batch = np.expand_dims(array, axis=0)           # (1, 150, 150, 3)
 
 probs = model.predict(batch)[0]
 print(CLASS_NAMES[int(np.argmax(probs))], probs.max())
 ```
 
-**Girdi:** 150×150×3 RGB görsel, piksel değerleri **0–1 aralığına ölçeklenmiş** (`/255`).
-Model bu ölçeklemeyi kendi içinde yapmaz — yukarıdaki gibi dışarıda uygulamanız gerekir.
+**Girdi:** 150×150×3 RGB, piksel değerleri **0–1 aralığına ölçeklenmiş** (`/255`).
+Model bu ölçeklemeyi içinde yapmaz, dışarıda uygulamanız gerekir.
 **Çıktı:** 3 elemanlı softmax olasılık vektörü — sırasıyla `paper`, `rock`, `scissors`.
 
-### İyi sonuç almak için ipuçları
+### Kendi verinizi toplama
 
-- Eli sade ve tek renk bir zemin önünde tutun (model bu tür verilerle eğitildi).
-- El, karenin büyük kısmını doldursun; çok uzaktan çekilen fotoğraflarda başarım düşer.
-- Aydınlatma yeterli olsun; aşırı karanlık veya ters ışık tahmini bozar.
+Kameradan, elin etrafı kırpılmış eğitim görselleri kaydeder (`s` kaydet, `q` çık):
 
----
+```bash
+python src/veri_topla.py --etiket rock --sayi 150
+python src/veri_topla.py --etiket paper
+python src/veri_topla.py --etiket scissors
+```
 
-## Yeniden Eğitim (isteğe bağlı)
+### Modeli yeniden eğitme
 
-Modeli kendi verinizle sıfırdan eğitmek isterseniz bu bölümü izleyin. **Modeli sadece kullanmak
-istiyorsanız bu adımlara gerek yoktur.**
-
-### Veri setini hazırlama
-
-Veri setleri boyutları nedeniyle depoya dahil edilmemiştir. Eğitim kodu, sınıf adlarının klasör
-adlarından okunduğu standart bir yapı bekler:
+Veri setleri boyutları nedeniyle depoda değildir. Eğitim kodu şu yapıyı bekler:
 
 ```
 veri/
@@ -137,63 +193,78 @@ veri/
 └── scissors/
 ```
 
-**Kaggle veri seti (2188 görsel):**
+Kaggle veri seti (2188 görsel):
 
 ```bash
 pip install kaggle
 kaggle datasets download -d drgfreeman/rockpaperscissors -p veri --unzip
 ```
 
-Veri setinin sayfası: [Rock-Paper-Scissors Images](https://www.kaggle.com/datasets/drgfreeman/rockpaperscissors)
-
-**Kendi fotoğraflarınız:** Yukarıdaki üç klasörü oluşturup kendi el fotoğraflarınızı ilgili
-klasörlere koymanız yeterlidir. Sınıf başına en az ~100 görsel önerilir. Bu projenin nihai modeli,
-Kaggle veri seti ile 450 adet gerçek ortam fotoğrafının birleştirilmesiyle (hibrit veri seti)
-eğitilmiştir; gerçek dünya performansını belirgin şekilde artıran adım budur.
-
-### Eğitimi başlatma
+Eğitimi başlatın:
 
 ```bash
-# Transfer learning (nihai modelin eğitildiği yöntem)
-python src/train.py --data-dir veri
-
-# Sıfırdan CNN (projenin ilk fazı)
-python src/train.py --data-dir veri --model cnn --epochs 20
+python src/train.py --data-dir veri                 # MobileNetV2 (nihai yöntem)
+python src/train.py --data-dir veri --model cnn     # Sıfırdan CNN (ilk faz)
 ```
-
-Eğitilen model varsayılan olarak `models/rps_model.keras` dosyasına yazılır — mevcut modelin
-üzerine yazmamak için `--output models/kendi_modelim.keras` kullanabilirsiniz.
 
 | Argüman | Varsayılan | Açıklama |
 |---------|-----------|----------|
-| `--data-dir` | *(zorunlu)* | `paper/ rock/ scissors/` alt klasörlerini içeren veri klasörü |
+| `--data-dir` | *(zorunlu)* | `paper/ rock/ scissors/` alt klasörlerini içeren klasör |
 | `--model` | `mobilenet` | `mobilenet` veya `cnn` |
 | `--epochs` | `10` | 1. aşama epoch sayısı |
 | `--finetune-epochs` | `20` | İnce ayar epoch sayısı |
 | `--batch-size` | `32` | Batch boyutu |
-| `--output` | `models/rps_model.keras` | Modelin kaydedileceği yol |
+| `--output` | `models/rps_model.keras` | Kayıt yolu (mevcut modelin üzerine yazmamak için değiştirin) |
 
-Eğitim sırasında en iyi doğrulama başarımına sahip ağırlıklar otomatik kaydedilir
-(`ModelCheckpoint`), iyileşme durursa öğrenme oranı düşürülür (`ReduceLROnPlateau`) ve
-eğitim erken durdurulur (`EarlyStopping`).
+---
 
-## Proje Yapısı
+## Modelin gelişimi
+
+| Aşama | Yaklaşım | Doğrulama Başarımı |
+|-------|----------|--------------------|
+| 1 | Sıfırdan CNN (3 evrişim bloğu) | %97.7 |
+| 2 | + EarlyStopping ile optimizasyon | %98.4 |
+| 3 | + Veri artırma (data augmentation) | %99.3 |
+| 4 | MobileNetV2 transfer learning + hibrit veri seti | **%99.4** |
+
+Hibrit veri seti = Kaggle'daki 2188 görsel + kamerayla toplanan 450 gerçek ortam fotoğrafı.
+Gerçek dünya performansını asıl artıran adım bu olmuştur: yalnızca laboratuvar koşullarında
+çekilmiş veriyle eğitilen model, gerçek bir odada zorlanıyordu.
+
+**Mimariler**
+
+- *Sıfırdan CNN:* `Conv2D(32) → MaxPool → Conv2D(64) → MaxPool → Conv2D(128) → MaxPool → Flatten → Dropout(0.5) → Dense(512) → Dense(3, softmax)`
+- *Transfer learning:* `MobileNetV2 (ImageNet) → GlobalAveragePooling → Dropout(0.5) → Dense(128) → Dense(3, softmax)`
+
+4. aşama iki kademede eğitilir: önce yalnızca yeni sınıflandırıcı katmanları (`lr=1e-3`),
+ardından MobileNetV2'nin son 40 katmanı çok düşük öğrenme oranıyla (`lr=1e-5`) ince ayarlanır.
+
+Depodaki `models/rps_model.keras` bu 4. aşama modelidir (24 MB). Önceki aşamaların modelleri
+`Flatten → Dense(512)` katmanı yüzünden ~218 MB olduğundan depoya dahil edilmemiştir;
+`src/train.py --model cnn` ile yeniden üretilebilirler.
+
+---
+
+## Proje yapısı
 
 ```
+├── kur.bat / kur.sh                 # Kurulum (bir kez çalıştırılır)
+├── oyna.bat / oyna.sh               # Oyunu başlatır
 ├── models/
 │   └── rps_model.keras              # Eğitilmiş model — kullanıma hazır
 ├── src/
-│   ├── train.py                     # Yerelde model eğitimi (CNN / MobileNetV2)
+│   ├── oyun.py                      # İki kişilik canlı oyun (MediaPipe + CNN)
 │   ├── predict.py                   # Tek görsel tahmini
-│   └── webcam.py                    # Canlı kamera demosu
-├── Tas_Kagit_Makas_Projesi.ipynb    # Orijinal Colab notebook (tüm deneyler ve çıktılarıyla)
+│   ├── veri_topla.py                # Kamerayla eğitim verisi toplama
+│   └── train.py                     # Model eğitimi
+├── arsiv/                           # Oyunun denenmiş önceki sürümleri
+├── Tas_Kagit_Makas_Projesi.ipynb    # Orijinal Colab notebook (tüm deneyler ve çıktılar)
 ├── tas_kagit_makas_projesi.py       # Notebook'un Colab'e özel dışa aktarımı
-├── requirements.txt
-└── *.pdf                            # Proje raporları ve sunum dokümanları
+└── *.pdf                            # Proje raporları
 ```
 
-`src/` altındaki scriptler yerelde çalışacak şekilde yazılmıştır ve Colab/Google Drive gerektirmez.
-Notebook ise projenin tüm geliştirme sürecini, eğitim çıktılarını ve grafiklerini kayıt altına alır.
+`src/` altındaki her şey yerelde çalışır; Colab veya Google Drive gerekmez.
+Notebook ise geliştirme sürecinin tamamını, eğitim çıktıları ve grafikleriyle birlikte saklar.
 
 ## Dokümanlar
 

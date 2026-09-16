@@ -1,6 +1,12 @@
-# Python 3.10 - 3.12 ile test edilmiştir.
-tensorflow>=2.16,<2.21
-numpy>=1.26
+# Python 3.10 - 3.12 gereklidir (3.13 henüz desteklenmiyor).
+#
+# Sürümler bilerek sabitlendi: mediapipe 1.0 ile birlikte oyunun kullandığı
+# `mediapipe.solutions` API'si kaldırıldı, OpenCV 5.0 de mediapipe 0.10 ile
+# uyumlu değil. Aşağıdaki kombinasyon test edilmiştir.
+
+tensorflow==2.18.*
+mediapipe==0.10.21
+opencv-python==4.11.*
+numpy>=1.26,<2.2
 pillow>=10.0
-matplotlib>=3.8
-opencv-python>=4.9   # sadece src/webcam.py için gerekli
+matplotlib>=3.8        # sadece eğitim grafikleri için
