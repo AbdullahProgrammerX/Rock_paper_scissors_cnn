@@ -45,16 +45,12 @@ Bu adım Python ortamını hazırlar ve gerekli her şeyi kurar. Birkaç dakika 
 | **Windows** | `oyna.bat` dosyasına **çift tıklayın** |
 | **Linux / macOS** | Terminalde `./oyna.sh` |
 
-Kamera HD çözünürlükte açılır. **Player 1** soldaki yeşil bölgeye, **Player 2** sağdaki kırmızı
-bölgeye elini tutar. Hamleler, güven skorlarıyla birlikte canlı olarak üstte görünür.
+Kamera HD çözünürlükte açılır. Ekranın ortasında yan yana iki bölge vardır:
+**Player 1** soldaki yeşil bölgeye, **Player 2** sağdaki kırmızı bölgeye elini tutar.
 
-| Tuş | İşlev |
-|-----|-------|
-| `SPACE` | Tur başlatır: 3-2-1 geri sayım, ardından hamleler kilitlenir ve puan verilir |
-| `R` | Skoru sıfırlar |
-| `Q` | Çıkar |
-
-Skor üst barda ortada durur. Turu kazanan oyuncunun bölgesi sonuç ekranında vurgulanır.
+Tuşa basmanız gerekmez. İki bölge de her karede aynı anda değerlendirilir; hamleler
+güven skorlarıyla bölgelerin üstünde, sonuç ise hemen altlarında anında görünür.
+Kazanan oyuncunun bölgesi vurgulanır. Çıkmak için `Q`.
 
 Kamera çözünürlüğünü değiştirebilirsiniz:
 
@@ -65,7 +61,7 @@ oyna.bat --width 1600 --height 900      # Windows
 
 **İyi tanıma için ipuçları**
 
-- Elinizi kutunun içinde, kameraya yakın tutun ve kutuyu doldurun.
+- Elinizi bölgenin içinde, kameraya yakın tutun ve bölgeyi doldurun.
 - Ortam yeterince aydınlık olsun; arkadan gelen güçlü ışık tanımayı bozar.
 - Sade bir arka plan (düz duvar) en iyi sonucu verir.
 - Hamlenizi net yapın: taş = kapalı yumruk, kağıt = açık avuç, makas = iki parmak.
@@ -270,7 +266,7 @@ Depodaki `models/rps_model.keras` bu 4. aşama modelidir (24 MB). Önceki aşama
 ├── models/
 │   └── rps_model.keras              # Eğitilmiş model — kullanıma hazır
 ├── src/
-│   ├── oyun.py                      # İki kişilik canlı oyun (MediaPipe + CNN, skorlu)
+│   ├── oyun.py                      # İki kişilik canlı oyun (MediaPipe + CNN)
 │   ├── predict.py                   # Tek görsel tahmini
 │   ├── veri_topla.py                # Kamerayla eğitim verisi toplama
 │   └── train.py                     # Model eğitimi

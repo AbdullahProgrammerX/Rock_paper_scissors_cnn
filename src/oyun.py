@@ -3,9 +3,9 @@
 Hands held inside the two on-screen zones are located with MediaPipe, classified
 with the trained CNN, and the winner is shown on screen.
 
+Both zones are processed on every frame; the result updates instantly below them.
+
 Controls:
-    SPACE  play a round (3-2-1 countdown, then moves are locked in)
-    R      reset the score
     Q      quit
 
 Usage:
@@ -17,7 +17,6 @@ import argparse
 import collections
 import pathlib
 import sys
-import time
 
 import cv2
 import mediapipe as mp
@@ -38,10 +37,8 @@ GREEN = (90, 220, 120)
 RED = (90, 90, 235)
 AMBER = (60, 190, 250)
 
-SMOOTHING = 7        # Tahmin kaç kare üzerinden oylanacak
+SMOOTHING = 7          # Tahmin kaç kare üzerinden oylanacak
 MIN_CONFIDENCE = 0.60  # Bunun altındaki tahminler gösterilmez
-COUNTDOWN = 3.0      # Saniye
-RESULT_HOLD = 2.5    # Sonucun ekranda kalma süresi (saniye)
 
 
 def parse_args():
@@ -109,13 +106,13 @@ def rounded_zone(frame, box, color, active):
 # --------------------------------------------------------------------------- #
 
 def winner_of(move1, move2):
-    """(sonuç metni, puan alan oyuncu) döndürür. Puan yoksa 0."""
+    """(sonuç metni, kazanan oyuncu) döndürür. Kazanan yoksa 0."""
     if move1 is None and move2 is None:
-        return "NO HANDS DETECTED", 0
+        return "WAITING FOR BOTH PLAYERS", 0
     if move1 is None:
-        return "PLAYER 1 DID NOT PLAY", 0
+        return "WAITING FOR PLAYER 1", 0
     if move2 is None:
-        return "PLAYER 2 DID NOT PLAY", 0
+        return "WAITING FOR PLAYER 2", 0
     if move1 == move2:
         return "DRAW", 0
     if (move1, move2) in (("rock", "scissors"), ("scissors", "paper"), ("paper", "rock")):
@@ -162,14 +159,13 @@ def crop_hand(roi, detector):
 
 
 class Player:
-    """Bir oyuncunun bölgesi, son tahminleri ve puanı."""
+    """Bir oyuncunun bölgesi ve son tahminleri."""
 
     def __init__(self, name, color, detector):
         self.name = name
         self.color = color
         self.detector = detector
         self.history = collections.deque(maxlen=SMOOTHING)
-        self.score = 0
         self.move = None          # Yumuşatılmış tahmin
         self.confidence = 0.0
         self.box = (0, 0, 0, 0)
@@ -213,41 +209,33 @@ class Player:
 
 # --------------------------------------------------------------------------- #
 
-def draw_hud(frame, players, state, result_text, countdown_left):
+def draw_hud(frame, players, result_text, winner):
     h, w = frame.shape[:2]
     # Tüm yazılar kamera genişliğine göre ölçeklenir; sabit boyutlar 640x480'de
-    # başlık, skor ve kısayolların üst üste binmesine yol açıyordu.
+    # başlık ve kısayolların üst üste binmesine yol açıyordu.
     s = max(0.62, min(1.25, w / 1280.0))
 
-    winner = 0
-    if state == "result":
-        winner = 1 if result_text.startswith("PLAYER 1") else 2 if result_text.startswith("PLAYER 2") else 0
-
-    # --- Üst bar: başlık, skor, kısayollar ---
-    bar_h = int(64 * s)
+    # --- Üst bar: başlık ve kısayol ---
+    bar_h = int(54 * s)
     panel(frame, 0, 0, w, bar_h, alpha=0.65)
-    baseline = int(bar_h * 0.64)
+    baseline = int(bar_h * 0.66)
 
     title = "ROCK  PAPER  SCISSORS"
-    score = f"{players[0].score}  -  {players[1].score}"
-    hint = "SPACE play   R reset   Q quit"
+    hint = "Q  quit"
     pad = int(20 * s)
 
-    title_w = text_size(title, 0.85 * s, 1)[0]
-    score_w = text_size(score, 1.0 * s, 2)[0]
+    title_w = text_size(title, 0.8 * s, 1)[0]
     hint_w = text_size(hint, 0.55 * s, 1)[0]
 
-    put_text(frame, title, pad, baseline, 0.85 * s, WHITE, 1)
-    put_text(frame, score, w // 2, baseline, 1.0 * s, AMBER, 2, anchor="center")
-    # Kısayol metni ancak skorla çakışmayacaksa çizilir.
-    if pad + title_w < (w - score_w) // 2 - pad and (w + score_w) // 2 + pad + hint_w < w - pad:
+    put_text(frame, title, pad, baseline, 0.8 * s, WHITE, 1)
+    if pad + title_w + pad + hint_w < w - pad:
         put_text(frame, hint, w - pad, baseline, 0.55 * s, DIM, 1, anchor="right")
 
     # --- Oyuncu bölgeleri ve etiketleri ---
     for index, player in enumerate(players, start=1):
         x1, y1, x2, y2 = player.box
-        # Sonuç ekranında yalnızca kazananın bölgesi vurgulanır.
-        active = winner == index if state == "result" else True
+        # Bir kazanan varsa yalnızca onun bölgesi tam parlaklıkta çizilir.
+        active = winner == index if winner else True
         rounded_zone(frame, player.box, player.color, active)
 
         # Etiket paneli kutunun hemen ÜSTÜNDE ve kutu genişliğinde — taşma olmaz.
@@ -272,35 +260,43 @@ def draw_hud(frame, players, state, result_text, countdown_left):
                        (x2 - x1) - 2 * inner,
                        player.confidence if player.move else 0.0, player.color, bar_h)
 
-    # --- Alt banner ---
-    banner_h = int(92 * s)
-    panel(frame, 0, h - banner_h, w, h, alpha=0.7)
-    line1_y = h - int(44 * s)
-    line2_y = h - int(16 * s)
+    # --- Sonuç: bölgelerin hemen altında, ekranın dibinde değil ---
+    zone_bottom = players[0].box[3]
+    band_top = zone_bottom + int(14 * s)
+    band_h = int(78 * s)
+    band_left = players[0].box[0]
+    band_right = players[1].box[2]
+    # Kamera alçak çözünürlükteyse bant alta taşabilir; o durumda yukarı çekilir.
+    if band_top + band_h > h:
+        band_top = max(zone_bottom, h - band_h)
 
-    if state == "countdown":
-        put_text(frame, str(max(1, int(np.ceil(countdown_left)))), w // 2, line1_y,
-                 1.7 * s, AMBER, 3, anchor="center")
-        put_text(frame, "GET READY", w // 2, line2_y, 0.58 * s, DIM, 1, anchor="center")
-    elif state == "result":
-        colour = GREEN if winner == 1 else RED if winner == 2 else AMBER
-        put_text(frame, result_text, w // 2, line1_y, 1.05 * s, colour, 2, anchor="center")
-        moves = " vs ".join(LABELS.get(p.move, "-") for p in players)
-        put_text(frame, moves, w // 2, line2_y, 0.58 * s, DIM, 1, anchor="center")
+    panel(frame, band_left, band_top, band_right, band_top + band_h, alpha=0.7)
+    centre = (band_left + band_right) // 2
+
+    colour = GREEN if winner == 1 else RED if winner == 2 else AMBER
+    put_text(frame, result_text, centre, band_top + int(42 * s), 1.0 * s, colour, 2,
+             anchor="center")
+
+    if all(p.move for p in players):
+        moves = f"{LABELS[players[0].move]}  vs  {LABELS[players[1].move]}"
     else:
-        put_text(frame, "PRESS SPACE TO PLAY A ROUND", w // 2, line1_y,
-                 0.82 * s, WHITE, 1, anchor="center")
-        put_text(frame, "Both players keep a hand inside the zones",
-                 w // 2, line2_y, 0.58 * s, DIM, 1, anchor="center")
+        moves = "Both players: keep one hand inside your zone"
+    put_text(frame, moves, centre, band_top + int(66 * s), 0.55 * s, DIM, 1, anchor="center")
 
 
 def layout(players, w, h):
-    """Bölgeleri kare oranını bozmadan, kamera çözünürlüğüne göre yerleştirir."""
-    size = int(min(h * 0.55, w * 0.30))
-    top = int(h * 0.26)
-    margin = int(w * 0.06)
-    players[0].box = (margin, top, margin + size, top + size)
-    players[1].box = (w - margin - size, top, w - margin, top + size)
+    """İki bölgeyi kare oranını bozmadan, karenin ortasında yan yana yerleştirir.
+
+    Bölgeler bilerek ekranın uçlarına değil ortaya yakın konur: uçlarda oyuncular
+    ellerini yana doğru uzatmak zorunda kalıyor ve kenarlar (pencere, lamba)
+    genelde ters ışık aldığı için el tespiti başarısız oluyordu.
+    """
+    size = int(min(h * 0.50, w * 0.33))
+    gap = int(w * 0.03)
+    top = int(h * 0.22)
+    left = (w - (2 * size + gap)) // 2
+    players[0].box = (left, top, left + size, top + size)
+    players[1].box = (left + size + gap, top, left + 2 * size + gap, top + size)
 
 
 def main():
@@ -334,11 +330,7 @@ def main():
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window, actual_w, actual_h)
 
-    state = "live"          # live | countdown | result
-    state_started = 0.0
-    result_text = ""
-
-    print("Ready. SPACE = play a round, R = reset score, Q = quit.")
+    print("Ready. Both players: hold one hand inside your zone. Q = quit.")
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -347,34 +339,16 @@ def main():
         h, w = frame.shape[:2]
         layout(players, w, h)
 
+        # İki bölge de her karede işlenir; sonuç beklemeden anında güncellenir.
         for player in players:
             player.update(frame, model)
 
-        now = time.monotonic()
-        countdown_left = 0.0
-
-        if state == "countdown":
-            countdown_left = COUNTDOWN - (now - state_started)
-            if countdown_left <= 0:
-                result_text, point = winner_of(players[0].move, players[1].move)
-                if point:
-                    players[point - 1].score += 1
-                state, state_started = "result", now
-        elif state == "result" and now - state_started > RESULT_HOLD:
-            state = "live"
-
-        draw_hud(frame, players, state, result_text, countdown_left)
+        result_text, winner = winner_of(players[0].move, players[1].move)
+        draw_hud(frame, players, result_text, winner)
         cv2.imshow(window, frame)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
-        if key == ord(" ") and state == "live":
-            state, state_started = "countdown", now
-        if key == ord("r"):
-            for player in players:
-                player.score = 0
-            state, result_text = "live", ""
 
     cap.release()
     cv2.destroyAllWindows()
