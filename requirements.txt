@@ -1,0 +1,6 @@
+# Python 3.10 - 3.12 ile test edilmiştir.
+tensorflow>=2.16,<2.21
+numpy>=1.26
+pillow>=10.0
+matplotlib>=3.8
+opencv-python>=4.9   # sadece src/webcam.py için gerekli

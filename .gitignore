@@ -1,0 +1,27 @@
+# --- Veri setleri (boyut nedeniyle repoya dahil edilmedi) ---
+veri_final_birlesik/
+veri_gercek/
+*.zip
+
+# --- Eğitilmiş model dosyaları ---
+*.keras
+*.h5
+*.tflite
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- Editör / işletim sistemi ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
