@@ -45,8 +45,23 @@ Bu adım Python ortamını hazırlar ve gerekli her şeyi kurar. Birkaç dakika 
 | **Windows** | `oyna.bat` dosyasına **çift tıklayın** |
 | **Linux / macOS** | Terminalde `./oyna.sh` |
 
-Kamera açılır. **Oyuncu 1** soldaki yeşil kutuya, **Oyuncu 2** sağdaki kırmızı kutuya elini tutar;
-hamleler ve kazanan anında ekranda görünür. Çıkmak için `q` tuşuna basın.
+Kamera HD çözünürlükte açılır. **Player 1** soldaki yeşil bölgeye, **Player 2** sağdaki kırmızı
+bölgeye elini tutar. Hamleler, güven skorlarıyla birlikte canlı olarak üstte görünür.
+
+| Tuş | İşlev |
+|-----|-------|
+| `SPACE` | Tur başlatır: 3-2-1 geri sayım, ardından hamleler kilitlenir ve puan verilir |
+| `R` | Skoru sıfırlar |
+| `Q` | Çıkar |
+
+Skor üst barda ortada durur. Turu kazanan oyuncunun bölgesi sonuç ekranında vurgulanır.
+
+Kamera çözünürlüğünü değiştirebilirsiniz:
+
+```bash
+oyna.bat --width 1600 --height 900      # Windows
+./oyna.sh --width 1600 --height 900     # Linux / macOS
+```
 
 **İyi tanıma için ipuçları**
 
@@ -54,6 +69,8 @@ hamleler ve kazanan anında ekranda görünür. Çıkmak için `q` tuşuna bası
 - Ortam yeterince aydınlık olsun; arkadan gelen güçlü ışık tanımayı bozar.
 - Sade bir arka plan (düz duvar) en iyi sonucu verir.
 - Hamlenizi net yapın: taş = kapalı yumruk, kağıt = açık avuç, makas = iki parmak.
+- Tahmin son 7 karenin oyuyla belirlenir; bir anlık yanlış okuma ekrana yansımaz.
+  Güven %60'ın altındaysa hamle "SHOW YOUR HAND" olarak kalır.
 
 ---
 
@@ -253,7 +270,7 @@ Depodaki `models/rps_model.keras` bu 4. aşama modelidir (24 MB). Önceki aşama
 ├── models/
 │   └── rps_model.keras              # Eğitilmiş model — kullanıma hazır
 ├── src/
-│   ├── oyun.py                      # İki kişilik canlı oyun (MediaPipe + CNN)
+│   ├── oyun.py                      # İki kişilik canlı oyun (MediaPipe + CNN, skorlu)
 │   ├── predict.py                   # Tek görsel tahmini
 │   ├── veri_topla.py                # Kamerayla eğitim verisi toplama
 │   └── train.py                     # Model eğitimi

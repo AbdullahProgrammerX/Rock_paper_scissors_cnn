@@ -1,16 +1,23 @@
-"""İki kişilik canlı taş-kağıt-makas oyunu.
+"""Two-player live rock-paper-scissors game.
 
-Kameradaki iki bölgeye (sol/sağ) tutulan eller MediaPipe ile bulunur, eğitilmiş
-CNN ile sınıflandırılır ve kazanan ekranda gösterilir. Çıkmak için 'q'.
+Hands held inside the two on-screen zones are located with MediaPipe, classified
+with the trained CNN, and the winner is shown on screen.
 
-Kullanım:
+Controls:
+    SPACE  play a round (3-2-1 countdown, then moves are locked in)
+    R      reset the score
+    Q      quit
+
+Usage:
     python src/oyun.py
-    python src/oyun.py --camera 1 --model models/rps_model.keras
+    python src/oyun.py --camera 1 --width 1600 --height 900
 """
 
 import argparse
+import collections
 import pathlib
 import sys
+import time
 
 import cv2
 import mediapipe as mp
@@ -18,70 +25,282 @@ import numpy as np
 import tensorflow as tf
 
 CLASS_NAMES = ["paper", "rock", "scissors"]
-TURKCE = {"paper": "Kagit", "rock": "Tas", "scissors": "Makas"}
+LABELS = {"paper": "PAPER", "rock": "ROCK", "scissors": "SCISSORS"}
 IMG_SIZE = 150
-BEKLEME = "Tespit Ediliyor..."
 
-# Kameradaki iki oyuncu bölgesi: (x1, y1, x2, y2)
-ROI1 = (50, 100, 300, 400)
-ROI2 = (340, 100, 590, 400)
+FONT = cv2.FONT_HERSHEY_DUPLEX
+
+# BGR renkler
+WHITE = (255, 255, 255)
+DIM = (170, 170, 170)
+DARK = (28, 28, 28)
+GREEN = (90, 220, 120)
+RED = (90, 90, 235)
+AMBER = (60, 190, 250)
+
+SMOOTHING = 7        # Tahmin kaç kare üzerinden oylanacak
+MIN_CONFIDENCE = 0.60  # Bunun altındaki tahminler gösterilmez
+COUNTDOWN = 3.0      # Saniye
+RESULT_HOLD = 2.5    # Sonucun ekranda kalma süresi (saniye)
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="İki kişilik canlı taş-kağıt-makas oyunu.")
-    p.add_argument("--model", default="models/rps_model.keras", help="Model dosyası")
-    p.add_argument("--camera", type=int, default=0, help="Kamera indeksi (varsayılan 0)")
+    p = argparse.ArgumentParser(description="Two-player live rock-paper-scissors.")
+    p.add_argument("--model", default="models/rps_model.keras", help="Model file")
+    p.add_argument("--camera", type=int, default=0, help="Camera index (default 0)")
+    p.add_argument("--width", type=int, default=1280, help="Capture width (default 1280)")
+    p.add_argument("--height", type=int, default=720, help="Capture height (default 720)")
     return p.parse_args()
 
 
-def get_winner(move1, move2):
-    """Oyunun kazananını belirler."""
-    if move1 == BEKLEME or move2 == BEKLEME:
-        return "Oyuncular bekleniyor..."
+# --------------------------------------------------------------------------- #
+# Çizim yardımcıları
+# --------------------------------------------------------------------------- #
+
+def panel(frame, x1, y1, x2, y2, alpha=0.55, color=DARK):
+    """Yarı saydam arka plan kutusu — yazıların her zeminde okunmasını sağlar."""
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
+    if x2 <= x1 or y2 <= y1:
+        return
+    roi = frame[y1:y2, x1:x2]
+    cv2.addWeighted(np.full_like(roi, color, np.uint8), alpha, roi, 1 - alpha, 0, roi)
+
+
+def text_size(text, scale, thickness):
+    return cv2.getTextSize(text, FONT, scale, thickness)[0]
+
+
+def put_text(frame, text, x, y, scale=0.7, color=WHITE, thickness=1, anchor="left"):
+    """Metni yazar. anchor: left | center | right — x buna göre yorumlanır."""
+    tw, _ = text_size(text, scale, thickness)
+    if anchor == "center":
+        x -= tw // 2
+    elif anchor == "right":
+        x -= tw
+    # Metni her zaman kare içinde tut; ekran görüntüsündeki taşma bu yüzden oluyordu.
+    x = max(8, min(x, frame.shape[1] - tw - 8))
+    cv2.putText(frame, text, (x, y), FONT, scale, color, thickness, cv2.LINE_AA)
+    return x
+
+
+def confidence_bar(frame, x, y, width, value, color, height=6):
+    """Güven skorunu ince bir çubukla gösterir."""
+    cv2.rectangle(frame, (x, y), (x + width, y + height), (70, 70, 70), -1)
+    filled = int(width * max(0.0, min(1.0, value)))
+    if filled:
+        cv2.rectangle(frame, (x, y), (x + filled, y + height), color, -1)
+
+
+def rounded_zone(frame, box, color, active):
+    """Oyuncu bölgesini köşe işaretleriyle çizer — düz dikdörtgenden daha okunur."""
+    x1, y1, x2, y2 = box
+    length = max(24, (x2 - x1) // 6)
+    thickness = 3 if active else 2
+    shade = color if active else tuple(int(c * 0.55) for c in color)
+    for cx, dx in ((x1, 1), (x2, -1)):
+        for cy, dy in ((y1, 1), (y2, -1)):
+            cv2.line(frame, (cx, cy), (cx + dx * length, cy), shade, thickness, cv2.LINE_AA)
+            cv2.line(frame, (cx, cy), (cx, cy + dy * length), shade, thickness, cv2.LINE_AA)
+
+
+# --------------------------------------------------------------------------- #
+# Oyun mantığı
+# --------------------------------------------------------------------------- #
+
+def winner_of(move1, move2):
+    """(sonuç metni, puan alan oyuncu) döndürür. Puan yoksa 0."""
+    if move1 is None and move2 is None:
+        return "NO HANDS DETECTED", 0
+    if move1 is None:
+        return "PLAYER 1 DID NOT PLAY", 0
+    if move2 is None:
+        return "PLAYER 2 DID NOT PLAY", 0
     if move1 == move2:
-        return "Berabere"
+        return "DRAW", 0
     if (move1, move2) in (("rock", "scissors"), ("scissors", "paper"), ("paper", "rock")):
-        return "Oyuncu 1 Kazandi"
-    return "Oyuncu 2 Kazandi"
+        return "PLAYER 1 WINS", 1
+    return "PLAYER 2 WINS", 2
 
 
-def process_hand(roi, hands_detector):
+def crop_hand(roi, detector):
     """Bölgedeki eli bulur, en boy oranını bozmadan kırpar ve modele hazırlar.
 
     El, kare bir tuvalin ortasına yerleştirilir; doğrudan yeniden boyutlandırmak
     eli yatay/dikey eziyor ve tahmini belirgin şekilde bozuyordu.
     """
-    results = hands_detector.process(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB))
+    results = detector.process(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB))
     if not results.multi_hand_landmarks:
         return None, None
 
-    hand_landmarks = results.multi_hand_landmarks[0]
+    landmarks = results.multi_hand_landmarks[0]
     h, w = roi.shape[:2]
-    xs = [lm.x for lm in hand_landmarks.landmark]
-    ys = [lm.y for lm in hand_landmarks.landmark]
+    xs = [lm.x for lm in landmarks.landmark]
+    ys = [lm.y for lm in landmarks.landmark]
 
-    padding = 20
-    x_min = max(0, int(min(xs) * w) - padding)
-    y_min = max(0, int(min(ys) * h) - padding)
-    x_max = min(w, int(max(xs) * w) + padding)
-    y_max = min(h, int(max(ys) * h) + padding)
+    pad = 20
+    x_min = max(0, int(min(xs) * w) - pad)
+    y_min = max(0, int(min(ys) * h) - pad)
+    x_max = min(w, int(max(xs) * w) + pad)
+    y_max = min(h, int(max(ys) * h) + pad)
 
-    hand_crop = roi[y_min:y_max, x_min:x_max]
-    if hand_crop.size == 0:
+    hand = roi[y_min:y_max, x_min:x_max]
+    if hand.size == 0:
         return None, None
 
-    crop_h, crop_w = hand_crop.shape[:2]
-    max_len = max(crop_w, crop_h)
-    square = np.zeros((max_len, max_len, 3), np.uint8)
-    y_off, x_off = (max_len - crop_h) // 2, (max_len - crop_w) // 2
-    square[y_off:y_off + crop_h, x_off:x_off + crop_w] = hand_crop
+    ch, cw = hand.shape[:2]
+    side = max(cw, ch)
+    square = np.zeros((side, side, 3), np.uint8)
+    square[(side - ch) // 2:(side - ch) // 2 + ch,
+           (side - cw) // 2:(side - cw) // 2 + cw] = hand
 
     resized = cv2.resize(square, (IMG_SIZE, IMG_SIZE))
-    # OpenCV BGR verir, model ise RGB ile eğitildi. Dönüşüm atlanırsa kırmızı ve mavi
+    # OpenCV BGR verir, model RGB ile eğitildi. Dönüşüm atlanırsa kırmızı ve mavi
     # kanallar yer değiştirir; ölçümde doğruluk %96.7'den %94.2'ye düşüyor.
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-    batch = np.expand_dims(rgb, axis=0) / 255.0   # Model 0-1 aralığı bekler.
-    return batch, hand_landmarks
+    return np.expand_dims(rgb, axis=0) / 255.0, landmarks
+
+
+class Player:
+    """Bir oyuncunun bölgesi, son tahminleri ve puanı."""
+
+    def __init__(self, name, color, detector):
+        self.name = name
+        self.color = color
+        self.detector = detector
+        self.history = collections.deque(maxlen=SMOOTHING)
+        self.score = 0
+        self.move = None          # Yumuşatılmış tahmin
+        self.confidence = 0.0
+        self.box = (0, 0, 0, 0)
+
+    def update(self, frame, model):
+        x1, y1, x2, y2 = self.box
+        roi = frame[y1:y2, x1:x2]
+        batch, landmarks = crop_hand(roi, self.detector)
+
+        if batch is None:
+            self.history.append(None)
+        else:
+            probs = model.predict(batch, verbose=0)[0]
+            idx = int(np.argmax(probs))
+            self.history.append((CLASS_NAMES[idx], float(probs[idx])))
+            mp.solutions.drawing_utils.draw_landmarks(
+                roi, landmarks, mp.solutions.hands.HAND_CONNECTIONS,
+                mp.solutions.drawing_utils.DrawingSpec(self.color, 1, 2),
+                mp.solutions.drawing_utils.DrawingSpec((220, 220, 220), 1, 1),
+            )
+
+        self._smooth()
+
+    def _smooth(self):
+        """Son karelerin çoğunluk oyu — tek karelik yanlış tahminlerin titremesini keser."""
+        votes = [h for h in self.history if h is not None]
+        if len(votes) < max(2, self.history.maxlen // 2):
+            self.move, self.confidence = None, 0.0
+            return
+
+        counts = collections.Counter(name for name, _ in votes)
+        best, _ = counts.most_common(1)[0]
+        scores = [conf for name, conf in votes if name == best]
+        confidence = sum(scores) / len(scores)
+
+        if confidence < MIN_CONFIDENCE:
+            self.move, self.confidence = None, confidence
+        else:
+            self.move, self.confidence = best, confidence
+
+
+# --------------------------------------------------------------------------- #
+
+def draw_hud(frame, players, state, result_text, countdown_left):
+    h, w = frame.shape[:2]
+    # Tüm yazılar kamera genişliğine göre ölçeklenir; sabit boyutlar 640x480'de
+    # başlık, skor ve kısayolların üst üste binmesine yol açıyordu.
+    s = max(0.62, min(1.25, w / 1280.0))
+
+    winner = 0
+    if state == "result":
+        winner = 1 if result_text.startswith("PLAYER 1") else 2 if result_text.startswith("PLAYER 2") else 0
+
+    # --- Üst bar: başlık, skor, kısayollar ---
+    bar_h = int(64 * s)
+    panel(frame, 0, 0, w, bar_h, alpha=0.65)
+    baseline = int(bar_h * 0.64)
+
+    title = "ROCK  PAPER  SCISSORS"
+    score = f"{players[0].score}  -  {players[1].score}"
+    hint = "SPACE play   R reset   Q quit"
+    pad = int(20 * s)
+
+    title_w = text_size(title, 0.85 * s, 1)[0]
+    score_w = text_size(score, 1.0 * s, 2)[0]
+    hint_w = text_size(hint, 0.55 * s, 1)[0]
+
+    put_text(frame, title, pad, baseline, 0.85 * s, WHITE, 1)
+    put_text(frame, score, w // 2, baseline, 1.0 * s, AMBER, 2, anchor="center")
+    # Kısayol metni ancak skorla çakışmayacaksa çizilir.
+    if pad + title_w < (w - score_w) // 2 - pad and (w + score_w) // 2 + pad + hint_w < w - pad:
+        put_text(frame, hint, w - pad, baseline, 0.55 * s, DIM, 1, anchor="right")
+
+    # --- Oyuncu bölgeleri ve etiketleri ---
+    for index, player in enumerate(players, start=1):
+        x1, y1, x2, y2 = player.box
+        # Sonuç ekranında yalnızca kazananın bölgesi vurgulanır.
+        active = winner == index if state == "result" else True
+        rounded_zone(frame, player.box, player.color, active)
+
+        # Etiket paneli kutunun hemen ÜSTÜNDE ve kutu genişliğinde — taşma olmaz.
+        label_h = int(58 * s)
+        label_bottom = y1 - int(10 * s)
+        label_top = label_bottom - label_h
+        panel(frame, x1, label_top, x2, label_bottom, alpha=0.6)
+
+        inner = int(12 * s)
+        put_text(frame, player.name, x1 + inner, label_top + int(22 * s), 0.55 * s, player.color, 1)
+
+        move_text = LABELS[player.move] if player.move else "SHOW YOUR HAND"
+        colour = WHITE if player.move else DIM
+        put_text(frame, move_text, x1 + inner, label_bottom - int(18 * s), 0.7 * s, colour, 1)
+
+        if player.move:
+            put_text(frame, f"{player.confidence * 100:.0f}%", x2 - inner,
+                     label_bottom - int(18 * s), 0.55 * s, DIM, 1, anchor="right")
+
+        bar_h = max(3, int(6 * s))
+        confidence_bar(frame, x1 + inner, label_bottom - bar_h - int(4 * s),
+                       (x2 - x1) - 2 * inner,
+                       player.confidence if player.move else 0.0, player.color, bar_h)
+
+    # --- Alt banner ---
+    banner_h = int(92 * s)
+    panel(frame, 0, h - banner_h, w, h, alpha=0.7)
+    line1_y = h - int(44 * s)
+    line2_y = h - int(16 * s)
+
+    if state == "countdown":
+        put_text(frame, str(max(1, int(np.ceil(countdown_left)))), w // 2, line1_y,
+                 1.7 * s, AMBER, 3, anchor="center")
+        put_text(frame, "GET READY", w // 2, line2_y, 0.58 * s, DIM, 1, anchor="center")
+    elif state == "result":
+        colour = GREEN if winner == 1 else RED if winner == 2 else AMBER
+        put_text(frame, result_text, w // 2, line1_y, 1.05 * s, colour, 2, anchor="center")
+        moves = " vs ".join(LABELS.get(p.move, "-") for p in players)
+        put_text(frame, moves, w // 2, line2_y, 0.58 * s, DIM, 1, anchor="center")
+    else:
+        put_text(frame, "PRESS SPACE TO PLAY A ROUND", w // 2, line1_y,
+                 0.82 * s, WHITE, 1, anchor="center")
+        put_text(frame, "Both players keep a hand inside the zones",
+                 w // 2, line2_y, 0.58 * s, DIM, 1, anchor="center")
+
+
+def layout(players, w, h):
+    """Bölgeleri kare oranını bozmadan, kamera çözünürlüğüne göre yerleştirir."""
+    size = int(min(h * 0.55, w * 0.30))
+    top = int(h * 0.26)
+    margin = int(w * 0.06)
+    players[0].box = (margin, top, margin + size, top + size)
+    players[1].box = (w - margin - size, top, w - margin, top + size)
 
 
 def main():
@@ -89,54 +308,73 @@ def main():
 
     model_path = pathlib.Path(args.model)
     if not model_path.exists():
-        sys.exit(f"Model bulunamadı: {model_path}\n"
-                 "Depoyu eksiksiz klonladığınızdan emin olun (models/rps_model.keras).")
+        sys.exit(f"Model not found: {model_path}\n"
+                 "Make sure you cloned the repository completely (models/rps_model.keras).")
 
     model = tf.keras.models.load_model(model_path)
 
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
-        sys.exit(f"Kamera açılamadı (indeks {args.camera}). --camera ile başka bir indeks deneyin.")
+        sys.exit(f"Could not open camera (index {args.camera}). Try --camera 1.")
 
-    mp_hands = mp.solutions.hands
-    mp_drawing = mp.solutions.drawing_utils
-    # Her oyuncu bölgesi için ayrı dedektör; tek dedektör iki bölge arasında kararsız kalıyor.
-    hands1 = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
-    hands2 = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"Camera resolution: {actual_w}x{actual_h}")
 
-    print("Oyun başladı. Ellerinizi kutuların içine tutun. Çıkmak için 'q'.")
+    hands = mp.solutions.hands
+    # Her bölge için ayrı dedektör; tek dedektör iki bölge arasında kararsız kalıyor.
+    players = [
+        Player("PLAYER 1", GREEN, hands.Hands(max_num_hands=1, min_detection_confidence=0.7)),
+        Player("PLAYER 2", RED, hands.Hands(max_num_hands=1, min_detection_confidence=0.7)),
+    ]
+
+    window = "Rock Paper Scissors"
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window, actual_w, actual_h)
+
+    state = "live"          # live | countdown | result
+    state_started = 0.0
+    result_text = ""
+
+    print("Ready. SPACE = play a round, R = reset score, Q = quit.")
     while True:
         ret, frame = cap.read()
         if not ret:
             break
         frame = cv2.flip(frame, 1)  # Ayna görüntüsü
+        h, w = frame.shape[:2]
+        layout(players, w, h)
 
-        moves = []
-        for (x1, y1, x2, y2), detector in ((ROI1, hands1), (ROI2, hands2)):
-            roi = frame[y1:y2, x1:x2]
-            batch, landmarks = process_hand(roi, detector)
-            if batch is None:
-                moves.append(BEKLEME)
-                continue
-            prediction = model.predict(batch, verbose=0)
-            moves.append(CLASS_NAMES[int(np.argmax(prediction))])
-            mp_drawing.draw_landmarks(roi, landmarks, mp_hands.HAND_CONNECTIONS)
+        for player in players:
+            player.update(frame, model)
 
-        move1, move2 = moves
-        winner = get_winner(move1, move2)
+        now = time.monotonic()
+        countdown_left = 0.0
 
-        cv2.rectangle(frame, ROI1[:2], ROI1[2:], (0, 255, 0), 2)
-        cv2.rectangle(frame, ROI2[:2], ROI2[2:], (0, 0, 255), 2)
-        cv2.putText(frame, f"Oyuncu 1: {TURKCE.get(move1, move1)}", (50, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-        cv2.putText(frame, f"Oyuncu 2: {TURKCE.get(move2, move2)}", (340, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-        cv2.putText(frame, winner, (220, 450),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        if state == "countdown":
+            countdown_left = COUNTDOWN - (now - state_started)
+            if countdown_left <= 0:
+                result_text, point = winner_of(players[0].move, players[1].move)
+                if point:
+                    players[point - 1].score += 1
+                state, state_started = "result", now
+        elif state == "result" and now - state_started > RESULT_HOLD:
+            state = "live"
 
-        cv2.imshow("Tas-Kagit-Makas", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        draw_hud(frame, players, state, result_text, countdown_left)
+        cv2.imshow(window, frame)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
             break
+        if key == ord(" ") and state == "live":
+            state, state_started = "countdown", now
+        if key == ord("r"):
+            for player in players:
+                player.score = 0
+            state, result_text = "live", ""
 
     cap.release()
     cv2.destroyAllWindows()
