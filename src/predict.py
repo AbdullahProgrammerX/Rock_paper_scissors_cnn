@@ -40,7 +40,9 @@ def main():
     model = keras.models.load_model(model_path)
 
     img = keras.utils.load_img(image_path, target_size=(IMG_SIZE, IMG_SIZE))
-    batch = np.expand_dims(keras.utils.img_to_array(img), axis=0)
+    # Model 0-1 araliginda olceklenmis girdi bekler (egitimde de boyle verildi).
+    array = keras.utils.img_to_array(img) / 255.0
+    batch = np.expand_dims(array, axis=0)
 
     probs = model.predict(batch, verbose=0)[0]
     best = int(np.argmax(probs))

@@ -50,9 +50,13 @@ def load_datasets(data_dir, batch_size):
     train_ds = keras.utils.image_dataset_from_directory(subset="training", **common)
     val_ds = keras.utils.image_dataset_from_directory(subset="validation", **common)
 
+    # Piksel degerlerini 0-1 araligina indirir. Olcekleme bilerek modelin DISINDA
+    # yapilir; boylece bu repodaki hazir model ile burada egitilen modeller ayni
+    # girdi formatini bekler ve predict.py/webcam.py ikisiyle de calisir.
+    rescale = lambda x, y: (x / 255.0, y)
     autotune = tf.data.AUTOTUNE
-    return (train_ds.cache().prefetch(autotune),
-            val_ds.cache().prefetch(autotune))
+    return (train_ds.map(rescale).cache().prefetch(autotune),
+            val_ds.map(rescale).cache().prefetch(autotune))
 
 
 def augmentation_block():
@@ -70,7 +74,6 @@ def build_simple_cnn():
     """Projenin ilk fazındaki sıfırdan eğitilen CNN."""
     return keras.Sequential([
         layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3)),
-        layers.Rescaling(1.0 / 255),
         augmentation_block(),
         layers.Conv2D(32, 3, activation="relu"), layers.MaxPooling2D(),
         layers.Conv2D(64, 3, activation="relu"), layers.MaxPooling2D(),
@@ -90,7 +93,6 @@ def build_mobilenet():
     base.trainable = False
 
     inputs = layers.Input(shape=(IMG_SIZE, IMG_SIZE, 3))
-    x = layers.Rescaling(1.0 / 255)(inputs)
     x = augmentation_block()(x)
     x = base(x, training=False)
     x = layers.GlobalAveragePooling2D()(x)

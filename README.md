@@ -16,6 +16,10 @@ Proje, sıfırdan yazılan basit bir CNN'den başlayıp veri artırma ve MobileN
 Aşama 4'teki model, iki kademeli eğitilir: önce yalnızca yeni sınıflandırıcı katmanları (`lr=1e-3`),
 ardından MobileNetV2'nin son 40 katmanı çok düşük öğrenme oranıyla (`lr=1e-5`) ince ayarlanır.
 
+**Depoyla birlikte gelen `models/rps_model.keras` dosyası, bu 4. aşama modelidir** (24 MB).
+Önceki aşamaların modelleri, `Flatten → Dense(512)` katmanı nedeniyle ~218 MB olduklarından
+depoya dahil edilmemiştir; `src/train.py --model cnn` ile yeniden üretilebilirler.
+
 ## Model Mimarisi
 
 **Sıfırdan CNN:** `Conv2D(32) → MaxPool → Conv2D(64) → MaxPool → Conv2D(128) → MaxPool → Flatten → Dropout(0.5) → Dense(512) → Dense(3, softmax)`
@@ -27,16 +31,19 @@ Takip edilen metrikler: accuracy, precision, recall ve macro F1-score.
 
 ---
 
-## Kurulum
+## Hızlı Başlangıç — Modeli Kullanma
+
+Model **zaten eğitilmiştir**; veri setini indirmenize veya yeniden eğitim yapmanıza gerek yoktur.
+Aşağıdaki üç adımla kendi bilgisayarınızda çalıştırabilirsiniz.
 
 ### 1. Depoyu klonlayın
 
 ```bash
-git clone https://github.com/AbdullahDOGAN1/rock-paper-scissors-cnn.git
-cd rock-paper-scissors-cnn
+git clone https://github.com/AbdullahProgrammerX/Rock_paper_scissors_cnn.git
+cd Rock_paper_scissors_cnn
 ```
 
-### 2. Sanal ortam oluşturun ve bağımlılıkları kurun
+### 2. Bağımlılıkları kurun
 
 **Windows (PowerShell):**
 ```powershell
@@ -52,64 +59,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-> Python 3.10–3.12 gereklidir. GPU şart değildir; CPU ile de eğitilir, yalnızca daha yavaştır.
+> Python 3.10–3.12 gereklidir. GPU şart değildir; tahmin için CPU fazlasıyla yeterlidir.
 
-### 3. Veri setini hazırlayın
+### 3. Modeli çalıştırın
 
-Veri setleri boyutları nedeniyle depoya dahil edilmemiştir. İki seçeneğiniz var:
+**Eğitilmiş model dosyası: `models/rps_model.keras`** — depoyla birlikte gelir, ayrıca indirmeniz gerekmez.
 
-**A) Kaggle veri seti (2188 görsel):**
-
-[Rock-Paper-Scissors Images](https://www.kaggle.com/datasets/drgfreeman/rockpaperscissors) veri setini indirip
-proje kökünde aşağıdaki yapıyı oluşturacak şekilde açın:
-
-```
-veri/
-├── paper/
-├── rock/
-└── scissors/
-```
-
-Kaggle CLI ile:
-```bash
-pip install kaggle
-kaggle datasets download -d drgfreeman/rockpaperscissors -p veri --unzip
-```
-
-**B) Kendi fotoğraflarınız:**
-
-`veri/paper`, `veri/rock`, `veri/scissors` klasörlerini oluşturup kendi el fotoğraflarınızı
-ilgili klasörlere koymanız yeterli. Sınıf başına en az ~100 görsel önerilir.
-Bu projenin en iyi modeli, Kaggle veri seti ile 450 adet gerçek ortam fotoğrafının
-birleştirilmesiyle (hibrit veri seti) eğitilmiştir — gerçek dünya performansını belirgin şekilde artırır.
-
----
-
-## Kullanım
-
-### Modeli eğitme
-
-```bash
-# Transfer learning (önerilen)
-python src/train.py --data-dir veri
-
-# Sıfırdan CNN
-python src/train.py --data-dir veri --model cnn --epochs 20
-```
-
-Eğitilen model `models/rps_model.keras` dosyasına kaydedilir. Tüm seçenekler için:
-`python src/train.py --help`
-
-| Argüman | Varsayılan | Açıklama |
-|---------|-----------|----------|
-| `--data-dir` | *(zorunlu)* | `paper/ rock/ scissors/` alt klasörlerini içeren veri klasörü |
-| `--model` | `mobilenet` | `mobilenet` veya `cnn` |
-| `--epochs` | `10` | 1. aşama epoch sayısı |
-| `--finetune-epochs` | `20` | İnce ayar epoch sayısı |
-| `--batch-size` | `32` | Batch boyutu |
-| `--output` | `models/rps_model.keras` | Kayıt yolu |
-
-### Tek bir görseli tahmin etme
+Tek bir fotoğrafı sınıflandırmak için:
 
 ```bash
 python src/predict.py foto.jpg
@@ -123,19 +79,109 @@ Tahmin: Makas (scissors)  —  güven: %98.7
   Makas   98.70%
 ```
 
-### Web kamerasıyla canlı demo
+Web kameranızla canlı denemek için:
 
 ```bash
 python src/webcam.py
 ```
 
-Elinizi ekrandaki yeşil karenin içine tutun; tahmin canlı olarak gösterilir. Çıkmak için `q`.
+Elinizi ekrandaki yeşil karenin içine tutun; tahmin ve güven skoru canlı olarak gösterilir.
+Çıkmak için `q` tuşuna basın.
+
+### Kendi kodunuzda kullanma
+
+Model standart bir Keras modelidir; doğrudan yükleyip kullanabilirsiniz:
+
+```python
+import numpy as np
+from tensorflow import keras
+
+CLASS_NAMES = ("paper", "rock", "scissors")   # Sıra önemlidir, modelin çıkış sırasıdır.
+
+model = keras.models.load_model("models/rps_model.keras")
+
+img = keras.utils.load_img("foto.jpg", target_size=(150, 150))
+array = keras.utils.img_to_array(img) / 255.0                   # 0-1 aralığına ölçekle
+batch = np.expand_dims(array, axis=0)                          # (1, 150, 150, 3)
+
+probs = model.predict(batch)[0]
+print(CLASS_NAMES[int(np.argmax(probs))], probs.max())
+```
+
+**Girdi:** 150×150×3 RGB görsel, piksel değerleri **0–1 aralığına ölçeklenmiş** (`/255`).
+Model bu ölçeklemeyi kendi içinde yapmaz — yukarıdaki gibi dışarıda uygulamanız gerekir.
+**Çıktı:** 3 elemanlı softmax olasılık vektörü — sırasıyla `paper`, `rock`, `scissors`.
+
+### İyi sonuç almak için ipuçları
+
+- Eli sade ve tek renk bir zemin önünde tutun (model bu tür verilerle eğitildi).
+- El, karenin büyük kısmını doldursun; çok uzaktan çekilen fotoğraflarda başarım düşer.
+- Aydınlatma yeterli olsun; aşırı karanlık veya ters ışık tahmini bozar.
 
 ---
+
+## Yeniden Eğitim (isteğe bağlı)
+
+Modeli kendi verinizle sıfırdan eğitmek isterseniz bu bölümü izleyin. **Modeli sadece kullanmak
+istiyorsanız bu adımlara gerek yoktur.**
+
+### Veri setini hazırlama
+
+Veri setleri boyutları nedeniyle depoya dahil edilmemiştir. Eğitim kodu, sınıf adlarının klasör
+adlarından okunduğu standart bir yapı bekler:
+
+```
+veri/
+├── paper/
+├── rock/
+└── scissors/
+```
+
+**Kaggle veri seti (2188 görsel):**
+
+```bash
+pip install kaggle
+kaggle datasets download -d drgfreeman/rockpaperscissors -p veri --unzip
+```
+
+Veri setinin sayfası: [Rock-Paper-Scissors Images](https://www.kaggle.com/datasets/drgfreeman/rockpaperscissors)
+
+**Kendi fotoğraflarınız:** Yukarıdaki üç klasörü oluşturup kendi el fotoğraflarınızı ilgili
+klasörlere koymanız yeterlidir. Sınıf başına en az ~100 görsel önerilir. Bu projenin nihai modeli,
+Kaggle veri seti ile 450 adet gerçek ortam fotoğrafının birleştirilmesiyle (hibrit veri seti)
+eğitilmiştir; gerçek dünya performansını belirgin şekilde artıran adım budur.
+
+### Eğitimi başlatma
+
+```bash
+# Transfer learning (nihai modelin eğitildiği yöntem)
+python src/train.py --data-dir veri
+
+# Sıfırdan CNN (projenin ilk fazı)
+python src/train.py --data-dir veri --model cnn --epochs 20
+```
+
+Eğitilen model varsayılan olarak `models/rps_model.keras` dosyasına yazılır — mevcut modelin
+üzerine yazmamak için `--output models/kendi_modelim.keras` kullanabilirsiniz.
+
+| Argüman | Varsayılan | Açıklama |
+|---------|-----------|----------|
+| `--data-dir` | *(zorunlu)* | `paper/ rock/ scissors/` alt klasörlerini içeren veri klasörü |
+| `--model` | `mobilenet` | `mobilenet` veya `cnn` |
+| `--epochs` | `10` | 1. aşama epoch sayısı |
+| `--finetune-epochs` | `20` | İnce ayar epoch sayısı |
+| `--batch-size` | `32` | Batch boyutu |
+| `--output` | `models/rps_model.keras` | Modelin kaydedileceği yol |
+
+Eğitim sırasında en iyi doğrulama başarımına sahip ağırlıklar otomatik kaydedilir
+(`ModelCheckpoint`), iyileşme durursa öğrenme oranı düşürülür (`ReduceLROnPlateau`) ve
+eğitim erken durdurulur (`EarlyStopping`).
 
 ## Proje Yapısı
 
 ```
+├── models/
+│   └── rps_model.keras              # Eğitilmiş model — kullanıma hazır
 ├── src/
 │   ├── train.py                     # Yerelde model eğitimi (CNN / MobileNetV2)
 │   ├── predict.py                   # Tek görsel tahmini

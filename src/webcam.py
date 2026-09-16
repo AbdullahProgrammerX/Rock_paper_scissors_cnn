@@ -55,9 +55,9 @@ def main():
         x1, y1 = (w - BOX) // 2, (h - BOX) // 2
         roi = frame[y1:y1 + BOX, x1:x1 + BOX]
 
-        # Modelin beklediği boyuta indir; ölçekleme modelin ilk katmanında yapılıyor.
+        # Modelin beklediği boyuta indir ve 0-1 aralığına ölçekle.
         resized = cv2.resize(roi, (IMG_SIZE, IMG_SIZE))
-        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype("float32")
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype("float32") / 255.0
         probs = model.predict(np.expand_dims(rgb, axis=0), verbose=0)[0]
         best = int(np.argmax(probs))
         label = f"{TURKCE[CLASS_NAMES[best]]}  %{probs[best] * 100:.0f}"

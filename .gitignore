@@ -4,9 +4,11 @@ veri_gercek/
 *.zip
 
 # --- Eğitilmiş model dosyaları ---
+# Yayınlanan model repoya dahildir; eğitim sırasında üretilen diğerleri hariç tutulur.
 *.keras
 *.h5
 *.tflite
+!models/rps_model.keras
 
 # --- Python ---
 __pycache__/
